@@ -24,7 +24,7 @@ export default function PaymentSuccessPage() {
     const saveOrder = async () => {
       try {
         const response = await fetch(
-          "https://9jabukabackend.vercel.app/api/orders/place",
+          "https://9jabukabackend-inky.vercel.app/api/orders/place",
           {
             method: "POST",
             headers: {

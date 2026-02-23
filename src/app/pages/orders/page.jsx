@@ -27,7 +27,7 @@ export default function OrderTrackPage() {
       setMode("loading");
       const finalizeOrder = async () => {
         try {
-          const res = await fetch("https://9jabukabackend.vercel.app/api/orders/place", {
+          const res = await fetch("https://9jabukabackend-inky.vercel.app/api/orders/place", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ sessionId }),
@@ -64,7 +64,7 @@ export default function OrderTrackPage() {
 
     try {
       const params = new URLSearchParams({ mobileNumber: mobileNumber.trim() });
-      const res = await fetch(`https://9jabukabackend.vercel.app/api/orders/track-by-phone-only?${params}`);
+      const res = await fetch(`https://9jabukabackend-inky.vercel.app/api/orders/track-by-phone-only?${params}`);
 
       const data = await res.json();
 

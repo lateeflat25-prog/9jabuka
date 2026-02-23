@@ -17,7 +17,7 @@ import Link from 'next/link';
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
 
 const createCheckoutSession = async (orderData) => {
-  const response = await fetch('https://9jabukabackend.vercel.app/api/orders/create-checkout-session', {
+  const response = await fetch('https://9jabukabackend-inky.vercel.app/api/orders/create-checkout-session', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(orderData),

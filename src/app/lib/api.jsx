@@ -1,7 +1,7 @@
 // import axios from 'axios';
 
 // const api = axios.create({
-//   baseURL: 'https://9jabukabackend.vercel.app/api',
+//   baseURL: 'https://9jabukabackend-inky.vercel.app/api',
 // });
 
 // export const uploadFood = async (formData) => {
@@ -53,7 +53,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'https://9jabukabackend.vercel.app/api',
+  baseURL: 'https://9jabukabackend-inky.vercel.app/api',
 });
 
 // Transform cart data to match backend expectations
