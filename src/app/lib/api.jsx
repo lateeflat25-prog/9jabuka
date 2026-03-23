@@ -53,7 +53,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'https://9jabukabackend-inky.vercel.app/api',
+  baseURL: 'http://localhost:5000/api',
 });
 
 // Transform cart data to match backend expectations
