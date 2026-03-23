@@ -1526,7 +1526,7 @@ const FoodOrderingSystem = () => {
         </div>
 
         {/* Main layout */}
-        <div className="fos-layout" id={window?.innerWidth > 1024 ? 'menu' : undefined}>
+<div className="fos-layout">
 
           {/* Sidebar */}
           <aside className="fos-sidebar">
