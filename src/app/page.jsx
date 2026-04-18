@@ -110,17 +110,8 @@ const VALID_ZIP_CODES = Object.keys(DELIVERY_ZONES);
 // ─── Delivery fee calculation (fair US average pricing) ──────────────────────
 // Base fee: $3.99 for first 3 miles, then $0.85/mile after, capped at $14.99
 const calculateDeliveryFee = (miles) => {
-  if (miles <= 0) return 3.99;
-  const BASE_FEE = 3.99;
-  const BASE_MILES = 3;
-  const PER_MILE_RATE = 0.85;
-  const MAX_FEE = 14.99;
-
-  let fee = BASE_FEE;
-  if (miles > BASE_MILES) {
-    fee += (miles - BASE_MILES) * PER_MILE_RATE;
-  }
-  return Math.min(parseFloat(fee.toFixed(2)), MAX_FEE);
+  if (miles <= 2) return 7.00;
+  return parseFloat((7.00 + (miles - 2) * 5.00).toFixed(2));
 };
 
 // ─── Geocoding via OpenStreetMap Nominatim (free, no API key) ────────────────
@@ -195,6 +186,8 @@ const formatCategoryName = (cat) =>
 // ─── Inline Styles ────────────────────────────────────────────────────────────
 
 
+
+
 // ─── Component ────────────────────────────────────────────────────────────────
 const FoodOrderingSystem = () => {
   const [cart, setCart] = useState([]);
@@ -209,7 +202,7 @@ const FoodOrderingSystem = () => {
   const [orderSuccess, setOrderSuccess] = useState(null);
   const [loading, setLoading] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [deliveryFee, setDeliveryFee] = useState(3.99);
+const [deliveryFee, setDeliveryFee] = useState(7.00);
   const [deliveryMiles, setDeliveryMiles] = useState(null);
   const [deliveryError, setDeliveryError] = useState(null);
   const [deliveryLoading, setDeliveryLoading] = useState(false);
@@ -239,7 +232,7 @@ const FoodOrderingSystem = () => {
 
   // Scroll shadow
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 10);
+    const onScroll = () => setScrolled(window.scrollY > 10);f5
     window.addEventListener('scroll', onScroll);
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
@@ -293,7 +286,8 @@ const FoodOrderingSystem = () => {
       } catch (err) {
         setDeliveryError(err.message);
         setDeliveryMiles(null);
-        setDeliveryFee(3.99);
+       setDeliveryFee(7.00);
+
       } finally {
         setDeliveryLoading(false);
       }
