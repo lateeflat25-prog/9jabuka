@@ -12,21 +12,55 @@ import { Elements } from '@stripe/react-stripe-js';
 import { getFoods } from '../../src/app/lib/api';
 import Link from 'next/link';
 import GLOBAL_STYLES from '../app/components/Styles';
-// ─── Stripe ───────────────────────────────────────────────────────────────────
+
+// ─── Stripe (only needed as fallback if backend returns session ID instead of URL) ──
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
 
 const createCheckoutSession = async (orderData) => {
-  const response = await fetch('https://9jabukabackend-inky.vercel.app/api/orders/create-checkout-session', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(orderData),
-  });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.message || 'Failed to create checkout session');
-  return result;
+  console.log('[Checkout] Sending:', JSON.stringify(orderData));
+
+  let response;
+  try {
+    response = await fetch('https://9jabukabackend-inky.vercel.app/api/orders/create-checkout-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(orderData),
+    });
+  } catch (networkErr) {
+    console.error('[Checkout] Network error:', networkErr);
+    throw new Error(`Network error: ${networkErr.message}`);
+  }
+
+  console.log('[Checkout] Status:', response.status);
+
+  let result;
+  try {
+    result = await response.json();
+    console.log('[Checkout] Body:', result);
+  } catch (parseErr) {
+    const raw = await response.text().catch(() => '(unreadable)');
+    console.error('[Checkout] Non-JSON response:', raw);
+    throw new Error(`Server returned non-JSON (${response.status}): ${raw.slice(0, 200)}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(`Server error ${response.status}: ${result?.message || result?.error || JSON.stringify(result)}`);
+  }
+
+  // Support both {url} and {id} response shapes
+  const redirectUrl = result.url;
+  const sessionId = result.id;
+
+  console.log('[Checkout] url:', redirectUrl, '| id:', sessionId);
+
+  if (!redirectUrl && !sessionId) {
+    throw new Error(`Backend response missing both 'url' and 'id'. Got: ${JSON.stringify(result)}`);
+  }
+
+  return { url: redirectUrl, id: sessionId };
 };
 
-// ─── Business location (origin for all distance calculations) ─────────────────
+// ─── Business location ────────────────────────────────────────────────────────
 const BUSINESS_LOCATION = {
   lat: 40.7242,
   lng: -74.2318,
@@ -35,143 +69,33 @@ const BUSINESS_LOCATION = {
 
 // ─── Delivery zones: ZIP → distance in miles from business ───────────────────
 const DELIVERY_ZONES = {
-  // Newark ZIPs
-  '07102': 4.8,
-  '07103': 4.2,
-  '07104': 5.1,
-  '07105': 5.8,
-  '07106': 3.5,
-  '07107': 5.5,
-  '07108': 3.9,
-  '07112': 4.0,
-  '07114': 5.6,
-  // Irvington (home base)
-  '07111': 0.5,
-  // East Orange
-  '07017': 2.1,
-  '07018': 2.6,
-  // Orange
-  '07050': 3.0,
-  // Maplewood
-  '07040': 3.8,
-  // Bloomfield
-  '07003': 4.3,
-  // Harrison
-  '07029': 5.4,
-  // Kearny
-  '07032': 6.1,
-  '07099': 6.4,
-  // Union
-  '07083': 6.5,
-  // Vauxhall
-  '07088': 7.2,
-  // Elizabeth
-  '07201': 8.4,
-  // Elizabethport
-  '07206': 9.1,
-  // Linden
-  '07036': 9.3,
-  // Rutherford
-  '07070': 11.3,
-  // Cedar Grove
-  '07009': 10.2,
-  // Millburn
-  '07041': 6.2,
-  // Livingston
-  '07039': 10.5,
-  // Westfield
-  '07090': 12.6,
-  // Secaucus
-  '07094': 12.8,
-  // Passaic
-  '07055': 12.9,
-  // Jersey City
-  '07097': 13.5,
-  '07302': 14.2,
-  // Union City
-  '07087': 13.9,
-  // North Bergen
-  '07047': 14.6,
-  // Plainfield
-  '07060': 15.8,
-  '07062': 16.4,
-  // Edgewater
-  '07020': 16.8,
-  // Hackensack
-  '07601': 19.2,  // near max
-  // Paterson
-  '07501': 18.9,
-  // Parsippany
-  '07054': 18.7,
+  '07102': 4.8, '07103': 4.2, '07104': 5.1, '07105': 5.8,
+  '07106': 3.5, '07107': 5.5, '07108': 3.9, '07112': 4.0,
+  '07114': 5.6, '07111': 0.5, '07017': 2.1, '07018': 2.6,
+  '07050': 3.0, '07040': 3.8, '07003': 4.3, '07029': 5.4,
+  '07032': 6.1, '07099': 6.4, '07083': 6.5, '07088': 7.2,
+  '07201': 8.4, '07206': 9.1, '07036': 9.3, '07070': 11.3,
+  '07009': 10.2, '07041': 6.2, '07039': 10.5, '07090': 12.6,
+  '07094': 12.8, '07055': 12.9, '07097': 13.5, '07302': 14.2,
+  '07087': 13.9, '07047': 14.6, '07060': 15.8, '07062': 16.4,
+  '07020': 16.8, '07601': 19.2, '07501': 18.9, '07054': 18.7,
 };
 
-const VALID_ZIP_CODES = Object.keys(DELIVERY_ZONES);
-
-// ─── Delivery fee calculation (fair US average pricing) ──────────────────────
-// Base fee: $3.99 for first 3 miles, then $0.85/mile after, capped at $14.99
+// ─── Delivery fee: $7 base up to 2 miles, then $0.50/mile after ──────────────
 const calculateDeliveryFee = (miles) => {
   if (miles <= 2) return 7.00;
-  return parseFloat((7.00 + (miles - 2) * 5.00).toFixed(2));
+  return parseFloat((7.00 + (miles - 2) * 0.50).toFixed(2));
 };
 
-// ─── Geocoding via OpenStreetMap Nominatim (free, no API key) ────────────────
-const geocodeAddress = async (address) => {
-  const encoded = encodeURIComponent(address);
-  const url = `https://nominatim.openstreetmap.org/search?q=${encoded}&format=json&limit=1&countrycodes=us`;
-  const res = await fetch(url, {
-    headers: { 'Accept-Language': 'en', 'User-Agent': '9jabuka-restaurant-app' },
-  });
-  const data = await res.json();
-  if (!data || data.length === 0) throw new Error('Address not found');
-  return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), displayName: data[0].display_name };
-};
-
-// ─── Haversine distance (miles) ──────────────────────────────────────────────
-const haversineDistance = (lat1, lng1, lat2, lng2) => {
-  const R = 3958.8; // Earth radius in miles
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-};
-
-// ─── Reverse geocode to get ZIP ──────────────────────────────────────────────
-const reverseGeocode = async (lat, lng) => {
-  const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`;
-  const res = await fetch(url, {
-    headers: { 'Accept-Language': 'en', 'User-Agent': '9jabuka-restaurant-app' },
-  });
-  const data = await res.json();
-  return {
-    zip: data?.address?.postcode || '',
-    road: data?.address?.road || '',
-    city: data?.address?.city || data?.address?.town || data?.address?.village || '',
-    state: data?.address?.state || '',
-    displayName: data?.display_name || '',
-  };
-};
-
-// ─── Full address → distance + fee ───────────────────────────────────────────
-const calculateDeliveryFromAddress = async (fullAddress) => {
-  const coords = await geocodeAddress(fullAddress);
-  const miles = haversineDistance(BUSINESS_LOCATION.lat, BUSINESS_LOCATION.lng, coords.lat, coords.lng);
+// ─── ZIP-only delivery lookup (instant, no external API) ─────────────────────
+const calculateDeliveryFromZip = (zip) => {
+  const trimmed = (zip || '').trim();
+  if (!DELIVERY_ZONES[trimmed]) {
+    throw new Error(`We don't deliver to ZIP ${trimmed}. We cover ~20 miles around Irvington, NJ.`);
+  }
+  const miles = DELIVERY_ZONES[trimmed];
   const fee = calculateDeliveryFee(miles);
-
-  // Check ZIP from address string
-  const zipMatch = fullAddress.match(/\b(\d{5})\b/);
-  const zip = zipMatch ? zipMatch[1] : '';
-
-  // Validate: must be in delivery zone OR within ~20 miles
-  if (zip && !DELIVERY_ZONES[zip] && miles > 20) {
-    throw new Error(`Sorry, we don't deliver to ${zip}. Max delivery radius is ~20 miles from Irvington, NJ.`);
-  }
-  if (!zip && miles > 20) {
-    throw new Error(`Sorry, this address is ${miles.toFixed(1)} miles away — outside our ~20-mile delivery zone.`);
-  }
-
-  return { miles: parseFloat(miles.toFixed(1)), fee, coords };
+  return { miles, fee };
 };
 
 // ─── Category emoji map ───────────────────────────────────────────────────────
@@ -182,11 +106,6 @@ const CAT_EMOJI = {
 
 const formatCategoryName = (cat) =>
   cat === 'all' ? 'All Items' : cat.charAt(0).toUpperCase() + cat.slice(1);
-
-// ─── Inline Styles ────────────────────────────────────────────────────────────
-
-
-
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const FoodOrderingSystem = () => {
@@ -202,11 +121,9 @@ const FoodOrderingSystem = () => {
   const [orderSuccess, setOrderSuccess] = useState(null);
   const [loading, setLoading] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-const [deliveryFee, setDeliveryFee] = useState(7.00);
+  const [deliveryFee, setDeliveryFee] = useState(7.00);
   const [deliveryMiles, setDeliveryMiles] = useState(null);
   const [deliveryError, setDeliveryError] = useState(null);
-  const [deliveryLoading, setDeliveryLoading] = useState(false);
-  const [locating, setLocating] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -215,9 +132,7 @@ const [deliveryFee, setDeliveryFee] = useState(7.00);
   const [selectedPanSize, setSelectedPanSize] = useState('');
   const [note, setNote] = useState('');
 
-  const { register, handleSubmit, formState: { errors }, watch, setValue, getValues } = useForm();
-  const watchedStreet = watch('streetAddress');
-  const watchedCity = watch('city');
+  const { register, handleSubmit, formState: { errors }, watch, setValue } = useForm();
   const watchedZip = watch('zipCode');
 
   // Inject styles once
@@ -231,12 +146,11 @@ const [deliveryFee, setDeliveryFee] = useState(7.00);
   }, []);
 
   // Scroll shadow
-// Scroll shadow
-useEffect(() => {
-  const onScroll = () => setScrolled(window.scrollY > 10);
-  window.addEventListener('scroll', onScroll);
-  return () => window.removeEventListener('scroll', onScroll);
-}, []);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 10);
+    window.addEventListener('scroll', onScroll);
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   // Fetch foods
   useEffect(() => {
@@ -267,92 +181,26 @@ useEffect(() => {
     })();
   }, []);
 
-  // Recalculate delivery fee when address fields change (debounced)
+  // ZIP-based delivery fee — instant, no API call
   useEffect(() => {
-    const street = watchedStreet;
-    const city = watchedCity;
-    const zip = watchedZip;
-
-    if (!street || !city || !zip) return;
-    if (zip.length < 5) return;
-
-    const fullAddress = `${street}, ${city}, NJ ${zip}`;
-    const timer = setTimeout(async () => {
-      setDeliveryLoading(true);
+    const zip = (watchedZip || '').trim();
+    if (zip.length < 5) {
+      setDeliveryFee(7.00);
+      setDeliveryMiles(null);
       setDeliveryError(null);
-      try {
-        const { miles, fee } = await calculateDeliveryFromAddress(fullAddress);
-        setDeliveryMiles(miles);
-        setDeliveryFee(fee);
-      } catch (err) {
-        setDeliveryError(err.message);
-        setDeliveryMiles(null);
-       setDeliveryFee(7.00);
-
-      } finally {
-        setDeliveryLoading(false);
-      }
-    }, 900);
-
-    return () => clearTimeout(timer);
-  }, [watchedStreet, watchedCity, watchedZip]);
-
-  // ── Geolocation: detect user's location ──
-  const handleLocateMe = () => {
-    if (!navigator.geolocation) {
-      setDeliveryError('Location detection is not supported on this device. Please type your address below.');
       return;
     }
-    if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-      setDeliveryError('Location detection requires a secure connection (HTTPS). Please type your address below.');
-      return;
+    try {
+      const { miles, fee } = calculateDeliveryFromZip(zip);
+      setDeliveryMiles(miles);
+      setDeliveryFee(fee);
+      setDeliveryError(null);
+    } catch (err) {
+      setDeliveryError(err.message);
+      setDeliveryMiles(null);
+      setDeliveryFee(7.00);
     }
-
-    setLocating(true);
-    setDeliveryError(null);
-
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          const lat = pos.coords.latitude;
-          const lng = pos.coords.longitude;
-          const info = await reverseGeocode(lat, lng);
-          if (info.road) setValue('streetAddress', info.road);
-          if (info.city) setValue('city', info.city);
-          if (info.zip) setValue('zipCode', info.zip);
-
-          const miles = haversineDistance(BUSINESS_LOCATION.lat, BUSINESS_LOCATION.lng, lat, lng);
-          const fee = calculateDeliveryFee(miles);
-          setDeliveryMiles(parseFloat(miles.toFixed(1)));
-          setDeliveryFee(fee);
-          setDeliveryError(null);
-
-          if (miles > 20) {
-            setDeliveryError(`Your location is ${miles.toFixed(1)} miles away — outside our ~20-mile delivery zone.`);
-          }
-        } catch {
-          setDeliveryError('Could not look up your address. Please type it manually below.');
-        } finally {
-          setLocating(false);
-        }
-      },
-      (err) => {
-        setLocating(false);
-        // Map every GeolocationPositionError code to a plain-English message
-        const MESSAGES = {
-          1: 'Location access was denied. To enable it: go to your device Settings → Privacy → Location Services → enable for your browser. Or just type your address below.',
-          2: 'Your device couldn\'t determine its location right now (try moving near a window or enabling Wi-Fi). Please type your address below.',
-          3: 'Location detection timed out. Please type your address below.',
-        };
-        setDeliveryError(MESSAGES[err.code] || 'Location unavailable. Please type your address below.');
-      },
-      {
-        timeout: 12000,
-        maximumAge: 60000,       // accept a cached position up to 1 min old
-        enableHighAccuracy: false // low-accuracy is faster and avoids kCLErrorLocationUnknown on iOS
-      }
-    );
-  };
+  }, [watchedZip]);
 
   // Filter
   useEffect(() => {
@@ -388,19 +236,28 @@ useEffect(() => {
   const addToCartFromModal = () => {
     if (!selectedFood || selectedFood.isSoldOut) return;
     const priceAtOrder = getModalPrice();
-    const cartItem = { id: selectedFood.id, name: selectedFood.name, priceAtOrder, quantity: modalQuantity, panSize: selectedPanSize || null, note: note.trim() || null, image: selectedFood.image };
+    const cartItem = {
+      id: selectedFood.id, name: selectedFood.name, priceAtOrder,
+      quantity: modalQuantity, panSize: selectedPanSize || null,
+      note: note.trim() || null, image: selectedFood.image,
+    };
     const existing = cart.find(i => i.id === cartItem.id && i.panSize === cartItem.panSize);
     if (existing) {
-      setCart(cart.map(i => i.id === existing.id && i.panSize === existing.panSize ? { ...i, quantity: i.quantity + modalQuantity } : i));
+      setCart(cart.map(i => i.id === existing.id && i.panSize === existing.panSize
+        ? { ...i, quantity: i.quantity + modalQuantity } : i));
     } else {
       setCart([...cart, cartItem]);
     }
     closeModal();
   };
 
-  // Cart
+  // Cart helpers
   const addToCart = (food) => {
-    if (food.isSoldOut) { setError("Sorry, this dish is currently sold out."); setTimeout(() => setError(null), 3500); return; }
+    if (food.isSoldOut) {
+      setError("Sorry, this dish is currently sold out.");
+      setTimeout(() => setError(null), 3500);
+      return;
+    }
     if (food.hasSizes && food.panSizes.length > 0) { openModal(food); return; }
     const cartItem = { id: food.id, name: food.name, priceAtOrder: food.price, quantity: 1, panSize: null, note: null, image: food.image };
     const existing = cart.find(i => i.id === cartItem.id && !i.panSize);
@@ -425,31 +282,66 @@ useEffect(() => {
   const getTotalPrice = () => cart.reduce((s, i) => s + i.priceAtOrder * i.quantity, 0).toFixed(2);
 
   const onCheckoutSubmit = async (data) => {
-    if (deliveryError) { setError('Please fix the delivery address before proceeding.'); return; }
+    if (deliveryError) { setError('Please enter a valid ZIP code before proceeding.'); return; }
+
+    // Strip ANY non-Latin1 chars — Stripe's btoa() crashes on them
+    const sanitize = (str) => {
+      if (!str && str !== 0) return '';
+      return String(str)
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')   // strip combining diacritics after NFD
+        .replace(/[^\x00-\xFF]/g, '')       // strip anything still outside Latin1
+        .replace(/[\u2018\u2019]/g, "'")    // curly single quotes → '
+        .replace(/[\u201C\u201D]/g, '"')    // curly double quotes → "
+        .replace(/[\u2013\u2014]/g, '-')    // en/em dash → -
+        .replace(/[\u2026]/g, '...')        // ellipsis → ...
+        .trim();
+    };
+
+    console.log('[Checkout] Cart items before sanitize:', cart.map(i => i.name));
+
+    const orderData = {
+      items: cart.map(i => ({
+        food: i.id,
+        quantity: i.quantity,
+        name: sanitize(i.name),
+        note: sanitize(i.note),
+      })),
+      mobileNumber: sanitize(data.mobileNumber),
+      deliveryLocation: sanitize(`${data.streetAddress}, ${data.city}, NJ ${data.zipCode}`),
+      deliveryFee: deliveryFee,
+    };
+
+    console.log('[Checkout] Sanitized order data:', JSON.stringify(orderData));
+
+    console.log('[Checkout] Form data:', data);
+    console.log('[Checkout] Cart:', cart);
+    console.log('[Checkout] Order payload:', orderData);
+
     try {
-      const orderData = {
-        items: cart.map(i => ({ food: i.id, quantity: i.quantity })),
-        mobileNumber: data.mobileNumber,
-        deliveryLocation: `${data.streetAddress}, ${data.city}, NJ ${data.zipCode}`,
-      };
-      const { id } = await createCheckoutSession(orderData);
+      const result = await createCheckoutSession(orderData);
+
+      // If backend returns a direct checkout URL, just redirect — no Stripe.js needed
+      if (result.url) {
+        console.log('[Checkout] Redirecting to URL:', result.url);
+        window.location.href = result.url;
+        return;
+      }
+
+      // Fallback: use session ID with Stripe.js
+      console.log('[Checkout] Using redirectToCheckout with session ID:', result.id);
       const stripe = await stripePromise;
-      await stripe.redirectToCheckout({ sessionId: id });
+      if (!stripe) throw new Error('Stripe failed to load. Check NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY.');
+      const { error: stripeError } = await stripe.redirectToCheckout({ sessionId: result.id });
+      if (stripeError) throw new Error(`Stripe error: ${stripeError.message}`);
     } catch (err) {
-      setError(err.message || 'Checkout failed');
+      console.error('[Checkout] FULL ERROR:', err);
+      setError(err.message || 'Unknown checkout error — check console for details.');
     }
   };
 
-  // Delivery info pill content
+  // Delivery info pill
   const renderDeliveryInfo = () => {
-    if (deliveryLoading || locating) {
-      return (
-        <div className="fos-delivery-info">
-          <Loader size={14} className="fos-spin" />
-          Calculating delivery distance…
-        </div>
-      );
-    }
     if (deliveryError) {
       return (
         <div className="fos-delivery-info error">
@@ -469,7 +361,7 @@ useEffect(() => {
     return (
       <div className="fos-delivery-info">
         <MapPin size={14} />
-        We deliver within ~20 miles of Irvington, NJ. Enter your address to see the fee.
+        We deliver within ~20 miles of Irvington, NJ. Enter your ZIP to see the fee.
       </div>
     );
   };
@@ -755,27 +647,13 @@ useEffect(() => {
                     {renderDeliveryInfo()}
 
                     <div className="fos-input-group">
-                      {/* Street address + locate button */}
-                      <div className="fos-address-row">
-                        <input
-                          type="text"
-                          placeholder="Street Address"
-                          {...register('streetAddress', { required: 'Street address is required' })}
-                          className="fos-input"
-                        />
-                        <button
-                          type="button"
-                          className="fos-locate-btn"
-                          onClick={handleLocateMe}
-                          disabled={locating}
-                          title="Use my current location"
-                        >
-                          {locating
-                            ? <Loader size={14} className="fos-spin" />
-                            : <Navigation size={14} />}
-                          {locating ? 'Locating…' : 'Locate Me'}
-                        </button>
-                      </div>
+                      {/* Street address */}
+                      <input
+                        type="text"
+                        placeholder="Street Address"
+                        {...register('streetAddress', { required: 'Street address is required' })}
+                        className="fos-input"
+                      />
                       {errors.streetAddress && <p className="fos-error-text">{errors.streetAddress.message}</p>}
 
                       <div className="fos-input-row">
@@ -841,11 +719,8 @@ useEffect(() => {
                       <XCircle size={13} /> {deliveryError}
                     </p>
                   )}
-                  <button type="submit" className="fos-pay-btn" disabled={!!deliveryError || deliveryLoading}>
-                    {deliveryLoading
-                      ? <><Loader size={16} className="fos-spin" /> Calculating…</>
-                      : <>Pay ${(parseFloat(getTotalPrice()) + deliveryFee).toFixed(2)} <ArrowRight size={16} /></>
-                    }
+                  <button type="submit" className="fos-pay-btn" disabled={!!deliveryError}>
+                    Pay ${(parseFloat(getTotalPrice()) + deliveryFee).toFixed(2)} <ArrowRight size={16} />
                   </button>
                 </div>
               </form>
