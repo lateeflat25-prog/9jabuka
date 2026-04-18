@@ -232,7 +232,6 @@ const [deliveryFee, setDeliveryFee] = useState(7.00);
 
   // Scroll shadow
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 10);f5
     window.addEventListener('scroll', onScroll);
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
