@@ -147,7 +147,7 @@ export default function PaymentSuccessPage() {
           </Link>
 
           <Link
-            href="/track"
+            href="/pages/orders"
             className="flex-1 bg-white border-2 border-gray-300 hover:border-gray-400 text-gray-800 font-medium py-4 px-6 rounded-xl text-center transition-colors duration-200"
           >
             Track Order
